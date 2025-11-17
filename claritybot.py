@@ -30,9 +30,8 @@ client = OpenAI(api_key=OPENAI_KEY)
 # -------------------------
 # CONFIG - Replace keys if needed
 # -------------------------
-TOKEN = "8233021006:AAHM_4fHryu8ToFwhc69j8XheVxrM_E06LA"  # <-- replace this if needed
-CRYPTO_PANIC_API_KEY = "3f14d218aa3c1e1f140e27a59136e8462c00977b"  # optional
-# LUNARCRUSH_API_KEY removed (paid). We'll use CoinGecko fallback for sentiment.
+TOKEN = "TELEGRAM_TOKEN"  # <-- replace this if needed
+CRYPTO_PANIC_API_KEY = "CRYPTO_PANIC_API_KEY"
 NFA_TEXT = "\n\n*⚠️ Not financial advice — do your own research.*"
 
 # -------------------------
