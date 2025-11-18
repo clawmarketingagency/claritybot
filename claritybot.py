@@ -2,12 +2,10 @@
 # Full runnable ClarityBot: keeps your content, fixes structure, adds SQLite persistence,
 # replaces LunarCrush with CoinGecko sentiment fallback, and polishes UX.
 
-import time
 import numpy as np
 import requests
-from statistics import mean
 from io import BytesIO
-from telegram import InputFile, Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InputFile, Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from websocket import WebSocketApp
 import json
@@ -18,10 +16,8 @@ import os
 import logging
 from openai import OpenAI
 from dotenv import load_dotenv
-import asyncio
 from playwright.async_api import async_playwright
 import pandas as pd
-import matplotlib.pyplot as plt
 
 load_dotenv()
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
