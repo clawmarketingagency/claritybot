@@ -6,7 +6,7 @@ import numpy as np
 import requests
 from io import BytesIO
 from telegram import InputFile, Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from websocket import WebSocketApp
 import json
 import threading
@@ -26,8 +26,8 @@ client = OpenAI(api_key=OPENAI_KEY)
 # -------------------------
 # CONFIG - Replace keys if needed
 # -------------------------
-TOKEN = "TELEGRAM_TOKEN"  # <-- replace this if needed
-CRYPTO_PANIC_API_KEY = "CRYPTO_PANIC_API_KEY"
+TOKEN = "8233021006:AAHM_4fHryu8ToFwhc69j8XheVxrM_E06LA"  # your real Telegram bot token
+CRYPTO_PANIC_API_KEY = "3f14d218aa3c1e1f140e27a59136e8462c00977b"
 NFA_TEXT = "\n\n*⚠️ Not financial advice — do your own research.*"
 
 # -------------------------
@@ -850,8 +850,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
     if data.startswith("chart|"):
         _, sym = data.split("|", 1)
-        await chart(update, ContextTypes.DEFAULT_TYPE)  # fallback (chart expects context.args)
-        # Note: Inline callbacks may require more complex handling to pass args; this is simple placeholder
+
+        # create dummy context with args for chart
+        class DummyContext:
+            args = [sym, "1h"]  # default timeframe
+
+        await chart(update, DummyContext())
+        await query.edit_message_text(f"Requested chart for {sym.upper()} (use /chart {sym} 1h)")        # fallback (chart expects context.args) # Note: Inline callbacks may require more complex handling to pass args; this is simple placeholder
         await query.edit_message_text(f"Requested chart for {sym.upper()} (use /chart {sym})")
     elif data == "btn_learn":
         await learn(update, context)
@@ -861,37 +866,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("To set alerts, use `/subscribe <coin>`", parse_mode="Markdown")
     else:
         await query.edit_message_text("Button action not implemented yet.")
-
-# ======================
-# /ANALYZE — Full TradingView-style AI Analysis
-# ======================
-# =========================
-# FETCH OHLC FROM BINANCE
-# =========================
-async def fetch_binance_ohlc(symbol: str, interval: str = "1h", limit: int = 200):
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval={interval}&limit={limit}"
-        r = requests.get(url).json()
-
-        if isinstance(r, dict) and "code" in r:
-            return None
-
-        ohlc = []
-        for c in r:
-            ohlc.append({
-                "time": c[0],
-                "open": float(c[1]),
-                "high": float(c[2]),
-                "low": float(c[3]),
-                "close": float(c[4]),
-                "volume": float(c[5]),
-            })
-
-        return ohlc
-
-    except Exception:
-        return None
-
 
 # ============================
 # /ANALYZE — AI Market Breakdown
@@ -978,6 +952,7 @@ Keep the tone sharp, trader-friendly, no emojis, no disclaimers.
 # ---------------
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
+
     # core commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -998,6 +973,7 @@ def main():
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("analyze", analyze))
     app.add_handler(CallbackQueryHandler(callback_handler))
+
     logger.info("Starting ClarityBot...")
     app.run_polling()
 
