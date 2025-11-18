@@ -214,24 +214,90 @@ def start_ws(symbol="btcusdt"):
 # Run websocket thread non-blocking
 threading.Thread(target=start_ws, daemon=True).start()
 
-# Utility: Fetch OHLC data from Binance
-def fetch_binance_ohlc(symbol: str, interval: str, limit=50):
+# ---------------------------------------------------------------------
+# CoinGecko OHLC Fetcher (Replaces Binance)
+# ---------------------------------------------------------------------
+def fetch_coingecko_ohlc(symbol: str, interval: str, limit=50):
     """
-    Fetch OHLC (candlestick) data from Binance.
+    Fetch OHLC data from CoinGecko and resample it to match standard intervals.
     Returns a DataFrame with columns: open, high, low, close, volume
     """
+
+    from datetime import datetime
+    import pandas as pd
+
+    # Map symbol to CoinGecko coin IDs
+    # You can expand this dictionary with the coins you need
+    COIN_MAP = {
+        "BTC": "bitcoin",
+        "ETH": "ethereum",
+        "SOL": "solana",
+        "XRP": "ripple",
+        "BNB": "binancecoin",
+    }
+
+    symbol = symbol.upper().replace("USDT", "")
+    if symbol not in COIN_MAP:
+        return None
+
+    coin_id = COIN_MAP[symbol]
+
+    # Determine how many days of data CoinGecko should return
+    interval_days = {
+        "1m": 1,
+        "5m": 1,
+        "15m": 1,
+        "30m": 1,
+        "1h": 1,
+        "4h": 7,
+        "1d": 90,
+    }.get(interval, 1)
+
     try:
-        r = requests.get(
-            f"https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval={interval}&limit={limit}"
-        ).json()
-        df = pd.DataFrame(r, columns=[
-            "open_time","open","high","low","close","volume",
-            "close_time","qav","trades","tb_base_av","tb_quote_av","ignore"
-        ])
-        df = df[["open","high","low","close","volume"]].astype(float)
+        url = (
+            f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
+            f"?vs_currency=usd&days={interval_days}"
+        )
+        r = requests.get(url).json()
+
+        if not isinstance(r, list):
+            return None
+
+        # CoinGecko returns: [timestamp, open, high, low, close]
+        df = pd.DataFrame(r, columns=["timestamp", "open", "high", "low", "close"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df["volume"] = 0  # CG doesn't provide volume in this endpoint
+
+        df = df[["timestamp", "open", "high", "low", "close", "volume"]]
+
+        # Set timestamp index for resampling
+        df = df.set_index("timestamp")
+
+        # Resampling rules
+        resample_map = {
+            "1m": "1T",
+            "5m": "5T",
+            "15m": "15T",
+            "30m": "30T",
+            "1h": "1H",
+            "4h": "4H",
+            "1d": "1D",
+        }
+
+        if interval in resample_map:
+            df = df.resample(resample_map[interval]).agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            }).dropna()
+
+        df = df.tail(limit)
         return df
+
     except Exception as e:
-        print(f"Error fetching OHLC: {e}")
+        print("Error fetching COINGECKO OHLC:", e)
         return None
 
 # -------------------------
@@ -868,67 +934,66 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Button action not implemented yet.")
 
 # ============================
-# /ANALYZE — AI Market Breakdown
+# /ANALYZE — AI Market Breakdown (CoinGecko)
 # ============================
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
-        await update.message.reply_text("Example: /analyze bitcoin 1h")
+        await update.message.reply_text("Example: /analyze btc 1h")
         return
 
-    symbol = context.args[0].lower()
+    symbol = context.args[0].upper()
     timeframe = context.args[1].lower() if len(context.args) > 1 else "1h"
 
-    # Map timeframe → minutes for OHLC fetch
-    tf_map = {
-        "1m": "1m",
-        "5m": "5m",
-        "15m": "15m",
-        "1h": "1h",
-        "4h": "4h",
-        "1d": "1d",
-        "1w": "1w"
-    }
+    valid_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
-    if timeframe not in tf_map:
-        await update.message.reply_text("❌ Invalid timeframe. Try: 1m, 5m, 15m, 1h, 4h, 1d, 1w")
+    if timeframe not in valid_timeframes:
+        await update.message.reply_text("❌ Invalid timeframe. Try: 1m 5m 15m 30m 1h 4h 1d")
         return
 
     msg = await update.message.reply_text("🧠 Analyzing market structure… Give me 2–3 sec 🔍")
 
     try:
-        # Fetch recent OHLC
-        ohlc = await fetch_binance_ohlc(symbol, tf_map[timeframe])
+        # Fetch OHLC from CoinGecko (sync → async wrapper)
+        loop = asyncio.get_event_loop()
+        ohlc = await loop.run_in_executor(None, fetch_coingecko_ohlc, symbol, timeframe, 120)
 
-        if not ohlc:
+        if ohlc is None or len(ohlc) < 20:
             await msg.edit_text("⚠️ Not enough price data to analyze that token.")
             return
 
-        # Convert OHLC to a readable list for the LLM
-        last_prices = "\n".join(
-            [f"{candle['time']}: O:{candle['open']} H:{candle['high']} L:{candle['low']} C:{candle['close']}"
-             for candle in ohlc[-80:]]
-        )
+        # Build readable OHLC list for LLM
+        ohlc_list = []
+        for ts, row in ohlc.iterrows():
+            ohlc_list.append(
+                f"{ts.strftime('%Y-%m-%d %H:%M')} | "
+                f"O:{round(row['open'], 4)} "
+                f"H:{round(row['high'], 4)} "
+                f"L:{round(row['low'], 4)} "
+                f"C:{round(row['close'], 4)}"
+            )
+
+        last_prices = "\n".join(ohlc_list[-80:])
 
         # ---- AI Request ----
         prompt = f"""
-You are a professional crypto market analyst. 
-Analyze the following OHLC data for {symbol.upper()} on the {timeframe} timeframe.
+You are a professional crypto market analyst.
+Analyze the following OHLC data for {symbol} on the {timeframe} timeframe.
 
 DATA (last 80 candles):
 {last_prices}
 
 Provide:
 
-1. **Trend Direction** (clear: bullish / bearish / ranging)
-2. **Key Market Structure** (HH/HL or LH/LL patterns)
+1. **Trend Direction** (bullish / bearish / ranging)
+2. **Key Market Structure** (HH/HL or LH/LL sequences)
 3. **Support & Resistance Levels**
 4. **Liquidity Zones**
-5. **Any squeeze, volatility shift, or breakout risk**
-6. **Smart Money Perspective**
-7. **Summary in 2 sentences**
-8. **Actionable trade ideas** (not signals, just levels & bias)
+5. **Squeeze, volatility shift, or breakout risk**
+6. **Smart Money / order flow perspective**
+7. **2-sentence summary**
+8. **Actionable trade ideas** (levels & bias only, no signals)
 
-Keep the tone sharp, trader-friendly, no emojis, no disclaimers.
+Tone: sharp, trader-focused, no emojis, no disclaimers.
 """
 
         ai_response = client.chat.completions.create(
@@ -938,10 +1003,12 @@ Keep the tone sharp, trader-friendly, no emojis, no disclaimers.
             max_tokens=650
         )
 
-        # FIX: extract text correctly
-        output_text = ai_response.choices[0].message.content
+        output_text = ai_response.choices[0].message.content.strip()
 
-        await msg.edit_text(f"📊 *{symbol.upper()} — AI Market Analysis ({timeframe})*\n\n{output_text}", parse_mode="Markdown")
+        await msg.edit_text(
+            f"📊 *{symbol} — AI Market Analysis ({timeframe})*\n\n{output_text}",
+            parse_mode="Markdown"
+        )
 
     except Exception as e:
         await msg.edit_text("⚠️ Couldn't generate analysis right now.")
