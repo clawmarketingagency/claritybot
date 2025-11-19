@@ -1,0 +1,12 @@
+app = "claritybot"
+
+[build]
+
+[env]
+PORT = "8080"
+BOT_TOKEN = "YOUR_TOKEN"
+WEBHOOK_URL = "https://claritybot.fly.dev/webhook"
+
+[[services]]
+internal_port = 8080
+protocol = "tcp"
