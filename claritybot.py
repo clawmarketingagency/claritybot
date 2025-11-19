@@ -18,6 +18,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 import pandas as pd
+import asyncio
 
 load_dotenv()
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
